@@ -1,0 +1,10 @@
+[package]
+name = "minicbor"
+version = "0.1.0"
+authors = ["Pyfisch <pyfisch@posteo.org>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+half = "1.4.0"
