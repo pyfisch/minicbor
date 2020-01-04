@@ -5,7 +5,7 @@ use core::str::{from_utf8, Utf8Error};
 
 use half::f16;
 
-pub use crate::token::Token;
+pub use crate::token::{Encoding, Token};
 
 mod token;
 
@@ -65,52 +65,65 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_token(&mut self, byte: u8) -> Result<Token<'a>> {
+        use crate::token::Encoding::*;
         use crate::token::Token::*;
         Ok(match byte {
             // Unsigned integers
-            0x00..=0x17 => Unsigned(byte.into()),
-            0x18 => Unsigned(self.take_u8()?.into()),
-            0x19 => Unsigned(self.take_u16()?.into()),
-            0x1a => Unsigned(self.take_u32()?.into()),
-            0x1b => Unsigned(self.take_u64()?),
+            0x00..=0x17 => Unsigned(byte.into(), SameByte),
+            0x18 => Unsigned(self.take_u8()?.into(), OneByte),
+            0x19 => Unsigned(self.take_u16()?.into(), TwoBytes),
+            0x1a => Unsigned(self.take_u32()?.into(), FourBytes),
+            0x1b => Unsigned(self.take_u64()?, EightBytes),
             0x1c..=0x1f => return Err(Error),
             // Negative integers
-            0x20..=0x37 => Negative((byte - 0x20).into()),
-            0x38 => Negative(self.take_u8()?.into()),
-            0x39 => Negative(self.take_u16()?.into()),
-            0x3a => Negative(self.take_u32()?.into()),
-            0x3b => Negative(self.take_u64()?),
+            0x20..=0x37 => Negative((byte - 0x20).into(), SameByte),
+            0x38 => Negative(self.take_u8()?.into(), OneByte),
+            0x39 => Negative(self.take_u16()?.into(), TwoBytes),
+            0x3a => Negative(self.take_u32()?.into(), FourBytes),
+            0x3b => Negative(self.take_u64()?, EightBytes),
             0x3c..=0x3f => return Err(Error),
             // Byte string
-            0x40..=0x57 => Bytes(self.take((byte - 0x40).into())?),
-            0x58 => Bytes(self.take_u8().and_then(|v| self.take(v.into()))?),
-            0x59 => Bytes(self.take_u16().and_then(|v| self.take(v.into()))?),
-            0x5a => Bytes(self.take_u32().and_then(|v| self.take(v.into()))?),
-            0x5b => Bytes(self.take_u64().and_then(|v| self.take(v))?),
+            0x40..=0x57 => Bytes(self.take((byte - 0x40).into())?, SameByte),
+            0x58 => Bytes(self.take_u8().and_then(|v| self.take(v.into()))?, OneByte),
+            0x59 => Bytes(self.take_u16().and_then(|v| self.take(v.into()))?, TwoBytes),
+            0x5a => Bytes(
+                self.take_u32().and_then(|v| self.take(v.into()))?,
+                FourBytes,
+            ),
+            0x5b => Bytes(self.take_u64().and_then(|v| self.take(v))?, EightBytes),
             0x5c..=0x5e => return Err(Error),
             0x5f => StartBytes,
             // UTF-8 string
-            0x60..=0x77 => Text(from_utf8(self.take((byte - 0x60).into())?)?),
-            0x78 => Text(self.take_u8().and_then(|v| self.take_text(v.into()))?),
-            0x79 => Text(self.take_u16().and_then(|v| self.take_text(v.into()))?),
-            0x7a => Text(self.take_u32().and_then(|v| self.take_text(v.into()))?),
-            0x7b => Text(self.take_u64().and_then(|v| self.take_text(v))?),
+            0x60..=0x77 => Text(from_utf8(self.take((byte - 0x60).into())?)?, SameByte),
+            0x78 => Text(
+                self.take_u8().and_then(|v| self.take_text(v.into()))?,
+                OneByte,
+            ),
+            0x79 => Text(
+                self.take_u16().and_then(|v| self.take_text(v.into()))?,
+                TwoBytes,
+            ),
+            0x7a => Text(
+                self.take_u32().and_then(|v| self.take_text(v.into()))?,
+                FourBytes,
+            ),
+            0x7b => Text(self.take_u64().and_then(|v| self.take_text(v))?, EightBytes),
             0x7c..=0x7e => return Err(Error),
             0x7f => StartText,
             // Array
-            0x80..=0x97 => StartArray(Some((byte - 0x80).into())),
-            0x98 => StartArray(Some(self.take_u8()?.into())),
-            0x99 => StartArray(Some(self.take_u16()?.into())),
-            0x9a => StartArray(Some(self.take_u32()?.into())),
-            0x9b => StartArray(Some(self.take_u64()?)),
+            0x80..=0x97 => StartArray(Some(((byte - 0x80).into(), SameByte))),
+            0x98 => StartArray(Some((self.take_u8()?.into(), OneByte))),
+            0x99 => StartArray(Some((self.take_u16()?.into(), TwoBytes))),
+            0x9a => StartArray(Some((self.take_u32()?.into(), FourBytes))),
+            0x9b => StartArray(Some((self.take_u64()?, EightBytes))),
             0x9c..=0x9e => return Err(Error),
             0x9f => StartArray(None),
             // Map
-            0xa0..=0xb7 => StartMap(Some((byte - 0xa0).into())),
-            0xb8 => StartMap(Some(self.take_u8()?.into())),
-            0xb9 => StartMap(Some(self.take_u16()?.into())),
-            0xba => StartMap(Some(self.take_u32()?.into())),
-            0xbb => StartMap(Some(self.take_u64()?)),
+            0xa0..=0xb7 => StartMap(Some(((byte - 0xa0).into(), SameByte))),
+            0xb8 => StartMap(Some((self.take_u8()?.into(), OneByte))),
+            0xb9 => StartMap(Some((self.take_u16()?.into(), TwoBytes))),
+            0xba => StartMap(Some((self.take_u32()?.into(), FourBytes))),
+            0xbb => StartMap(Some((self.take_u64()?, EightBytes))),
             0xbc..=0xbe => return Err(Error),
             0xbf => StartMap(None),
             // Tag

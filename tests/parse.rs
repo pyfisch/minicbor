@@ -1,4 +1,5 @@
 use minicbor::{
+    Encoding::*,
     Parser, Result,
     Token::{self, *},
 };
@@ -10,6 +11,11 @@ fn test_parse() {
     let tokens = output.expect("valid");
     assert_eq!(
         tokens,
-        vec![StartArray(Some(3)), Unsigned(1), Unsigned(2), Unsigned(3)]
+        vec![
+            StartArray(Some((3, SameByte))),
+            Unsigned(1, SameByte),
+            Unsigned(2, SameByte),
+            Unsigned(3, SameByte)
+        ]
     );
 }
