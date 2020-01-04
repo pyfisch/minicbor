@@ -5,12 +5,16 @@ use core::str::{from_utf8, Utf8Error};
 
 use half::f16;
 
+pub use crate::token::Token;
+
+mod token;
+
 pub struct Parser<'a> {
     src: &'a [u8],
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(src: &[u8]) -> Parser {
+    pub fn from_slice(src: &[u8]) -> Parser {
         Parser { src }
     }
 }
@@ -23,27 +27,6 @@ impl<'a> Iterator for Parser<'a> {
         self.src = rest;
         Some(self.parse_token(byte))
     }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum Token<'a> {
-    Unsigned(u64),
-    Negative(u64),
-    ByteString(&'a [u8]),
-    ByteStringStart,
-    TextString(&'a str),
-    TextStringStart,
-    ArrayStart(Option<u64>),
-    MapStart(Option<u64>),
-    Tag(u64),
-    SimpleValue(u8),
-    Bool(bool),
-    Null,
-    Undefined,
-    Half(f16),
-    Single(f32),
-    Double(f64),
-    StopCode,
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -82,7 +65,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_token(&mut self, byte: u8) -> Result<Token<'a>> {
-        use Token::*;
+        use crate::token::Token::*;
         Ok(match byte {
             // Unsigned integers
             0x00..=0x17 => Unsigned(byte.into()),
@@ -99,37 +82,37 @@ impl<'a> Parser<'a> {
             0x3b => Negative(self.take_u64()?),
             0x3c..=0x3f => return Err(Error),
             // Byte string
-            0x40..=0x57 => ByteString(self.take((byte - 0x40).into())?),
-            0x58 => ByteString(self.take_u8().and_then(|v| self.take(v.into()))?),
-            0x59 => ByteString(self.take_u16().and_then(|v| self.take(v.into()))?),
-            0x5a => ByteString(self.take_u32().and_then(|v| self.take(v.into()))?),
-            0x5b => ByteString(self.take_u64().and_then(|v| self.take(v))?),
+            0x40..=0x57 => Bytes(self.take((byte - 0x40).into())?),
+            0x58 => Bytes(self.take_u8().and_then(|v| self.take(v.into()))?),
+            0x59 => Bytes(self.take_u16().and_then(|v| self.take(v.into()))?),
+            0x5a => Bytes(self.take_u32().and_then(|v| self.take(v.into()))?),
+            0x5b => Bytes(self.take_u64().and_then(|v| self.take(v))?),
             0x5c..=0x5e => return Err(Error),
-            0x5f => ByteStringStart,
+            0x5f => StartBytes,
             // UTF-8 string
-            0x60..=0x77 => TextString(from_utf8(self.take((byte - 0x60).into())?)?),
-            0x78 => TextString(self.take_u8().and_then(|v| self.take_text(v.into()))?),
-            0x79 => TextString(self.take_u16().and_then(|v| self.take_text(v.into()))?),
-            0x7a => TextString(self.take_u32().and_then(|v| self.take_text(v.into()))?),
-            0x7b => TextString(self.take_u64().and_then(|v| self.take_text(v))?),
+            0x60..=0x77 => Text(from_utf8(self.take((byte - 0x60).into())?)?),
+            0x78 => Text(self.take_u8().and_then(|v| self.take_text(v.into()))?),
+            0x79 => Text(self.take_u16().and_then(|v| self.take_text(v.into()))?),
+            0x7a => Text(self.take_u32().and_then(|v| self.take_text(v.into()))?),
+            0x7b => Text(self.take_u64().and_then(|v| self.take_text(v))?),
             0x7c..=0x7e => return Err(Error),
-            0x7f => TextStringStart,
+            0x7f => StartText,
             // Array
-            0x80..=0x97 => ArrayStart(Some((byte - 0x80).into())),
-            0x98 => ArrayStart(Some(self.take_u8()?.into())),
-            0x99 => ArrayStart(Some(self.take_u16()?.into())),
-            0x9a => ArrayStart(Some(self.take_u32()?.into())),
-            0x9b => ArrayStart(Some(self.take_u64()?)),
+            0x80..=0x97 => StartArray(Some((byte - 0x80).into())),
+            0x98 => StartArray(Some(self.take_u8()?.into())),
+            0x99 => StartArray(Some(self.take_u16()?.into())),
+            0x9a => StartArray(Some(self.take_u32()?.into())),
+            0x9b => StartArray(Some(self.take_u64()?)),
             0x9c..=0x9e => return Err(Error),
-            0x9f => ArrayStart(None),
+            0x9f => StartArray(None),
             // Map
-            0xa0..=0xb7 => MapStart(Some((byte - 0xa0).into())),
-            0xb8 => MapStart(Some(self.take_u8()?.into())),
-            0xb9 => MapStart(Some(self.take_u16()?.into())),
-            0xba => MapStart(Some(self.take_u32()?.into())),
-            0xbb => MapStart(Some(self.take_u64()?)),
+            0xa0..=0xb7 => StartMap(Some((byte - 0xa0).into())),
+            0xb8 => StartMap(Some(self.take_u8()?.into())),
+            0xb9 => StartMap(Some(self.take_u16()?.into())),
+            0xba => StartMap(Some(self.take_u32()?.into())),
+            0xbb => StartMap(Some(self.take_u64()?)),
             0xbc..=0xbe => return Err(Error),
-            0xbf => MapStart(None),
+            0xbf => StartMap(None),
             // Tag
             0xc0..=0xd7 => Tag((byte - 0xc0).into()),
             0xd8 => Tag(self.take_u8()?.into()),
@@ -138,17 +121,13 @@ impl<'a> Parser<'a> {
             0xdb => Tag(self.take_u64()?),
             0xdc..=0xdf => return Err(Error),
             // Other
-            0xe0..=0xf3 => SimpleValue(byte - 0xe0),
-            0xf4 => Bool(false),
-            0xf5 => Bool(true),
-            0xf6 => Null,
-            0xf7 => Undefined,
+            0xe0..=0xf7 => SimpleValue(byte - 0xe0),
             0xf8 => SimpleValue(self.take_u8()?),
             0xf9 => Half(f16::from_bits(self.take_u16()?)),
             0xfa => Single(f32::from_bits(self.take_u32()?)),
             0xfb => Double(f64::from_bits(self.take_u64()?)),
             0xfc..=0xfe => return Err(Error),
-            0xff => StopCode,
+            0xff => Stop,
         })
     }
 }
